@@ -26,13 +26,14 @@ const io = new Server(httpServer, {
 });
 
 // Gestion des participants par salle
-const participants = {}; // { roomId: { socketId: userName } }
+// Chaque participant : { socketId, userName, profilePhoto, isMuted, isVideoOff, isScreenSharing }
+const participants = {}; // { roomId: { socketId: { userName, profilePhoto, isMuted, isVideoOff, isScreenSharing } } }
 
-// Middleware d'authentification
+// Middleware d'authentification (à adapter selon votre backend Laravel)
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
-    // Ici vous devriez valider le token avec votre backend Laravel
+    // Ici vous pouvez valider le token avec Laravel si besoin
     if (!token) throw new Error('Token manquant');
     next();
   } catch (err) {
@@ -45,24 +46,65 @@ io.on('connection', (socket) => {
   console.log('Nouvelle connexion:', socket.id);
 
   // Quand un utilisateur rejoint une salle
-  socket.on('join-room', (roomId, userName) => {
+  socket.on('join-room', (roomId, userName, profilePhoto = null) => {
     socket.join(roomId);
 
     // Initialise la salle si besoin
     if (!participants[roomId]) participants[roomId] = {};
 
-    // Ajoute le participant
-    participants[roomId][socket.id] = userName;
+    // Ajoute le participant avec ses infos de base
+    participants[roomId][socket.id] = {
+      userName,
+      profilePhoto,
+      isMuted: false,
+      isVideoOff: false,
+      isScreenSharing: false
+    };
 
     // Envoie la liste à tous les clients de la salle
-    io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, userName]) => ({
+    io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
       socketId,
-      userName
+      ...user
     })));
 
     // Notifie les autres (optionnel)
-    socket.to(roomId).emit('user-joined', { socketId: socket.id, userName });
+    socket.to(roomId).emit('user-joined', { socketId: socket.id, userName, profilePhoto });
     console.log(`Socket ${socket.id} (${userName}) a rejoint la salle ${roomId}`);
+  });
+
+  // Mise à jour du statut (mute/unmute, vidéo on/off)
+  socket.on('update-status', (roomId, status) => {
+    if (participants[roomId] && participants[roomId][socket.id]) {
+      if ('isMuted' in status) participants[roomId][socket.id].isMuted = status.isMuted;
+      if ('isVideoOff' in status) participants[roomId][socket.id].isVideoOff = status.isVideoOff;
+      io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
+        socketId,
+        ...user
+      })));
+    }
+  });
+
+  // Partage d'écran
+  socket.on('screen-share-start', (roomId) => {
+    if (participants[roomId] && participants[roomId][socket.id]) {
+      participants[roomId][socket.id].isScreenSharing = true;
+      io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
+        socketId,
+        ...user
+      })));
+      socket.to(roomId).emit('screen-share-started', { socketId: socket.id });
+    }
+  });
+
+  socket.on('screen-share-stop', (roomId) => {
+    if (participants[roomId] && participants[roomId][socket.id]) {
+      participants[roomId][socket.id].isScreenSharing = false;
+      io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
+        socketId,
+        ...user
+      })));
+      socket.to(roomId).emit('screen-share-stopped', { socketId: socket.id });
+    }
   });
 
   // Signalisation WebRTC
@@ -79,9 +121,9 @@ io.on('connection', (socket) => {
       if (participants[roomId]) {
         delete participants[roomId][socket.id];
         // Met à jour la liste pour tous
-        io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, userName]) => ({
+        io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
           socketId,
-          userName
+          ...user
         })));
       }
     }
