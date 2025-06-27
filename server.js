@@ -12,25 +12,27 @@ app.use(cors({
   credentials: true
 }));
 
-// Configuration Socket.IO cruciale
+// Configuration Socket.IO
 const io = new Server(httpServer, {
-  path: '/socket.io', // Chemin d'accès explicite
+  path: '/socket.io',
   cors: {
     origin: 'https://edusmart.erequest.net',
     methods: ['GET', 'POST'],
     credentials: true
   },
-  transports: ['websocket', 'polling'], // Activation des deux transports
+  transports: ['websocket', 'polling'],
   pingInterval: 25000,
   pingTimeout: 20000
 });
+
+// Gestion des participants par salle
+const participants = {}; // { roomId: { socketId: userName } }
 
 // Middleware d'authentification
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
     // Ici vous devriez valider le token avec votre backend Laravel
-    // Exemple fictif :
     if (!token) throw new Error('Token manquant');
     next();
   } catch (err) {
@@ -42,11 +44,25 @@ io.use(async (socket, next) => {
 io.on('connection', (socket) => {
   console.log('Nouvelle connexion:', socket.id);
 
-  // Gestion des salles (exemple pour les appels vidéo)
-  socket.on('join-room', (roomId) => {
+  // Quand un utilisateur rejoint une salle
+  socket.on('join-room', (roomId, userName) => {
     socket.join(roomId);
-    console.log(`Socket ${socket.id} a rejoint la salle ${roomId}`);
-    socket.to(roomId).emit('user-connected', socket.id);
+
+    // Initialise la salle si besoin
+    if (!participants[roomId]) participants[roomId] = {};
+
+    // Ajoute le participant
+    participants[roomId][socket.id] = userName;
+
+    // Envoie la liste à tous les clients de la salle
+    io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, userName]) => ({
+      socketId,
+      userName
+    })));
+
+    // Notifie les autres (optionnel)
+    socket.to(roomId).emit('user-joined', { socketId: socket.id, userName });
+    console.log(`Socket ${socket.id} (${userName}) a rejoint la salle ${roomId}`);
   });
 
   // Signalisation WebRTC
@@ -57,10 +73,19 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Gestion de déconnexion
-  socket.on('disconnect', () => {
+  // Quand un utilisateur quitte (déconnexion)
+  socket.on('disconnecting', () => {
+    for (const roomId of socket.rooms) {
+      if (participants[roomId]) {
+        delete participants[roomId][socket.id];
+        // Met à jour la liste pour tous
+        io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, userName]) => ({
+          socketId,
+          userName
+        })));
+      }
+    }
     console.log('Déconnexion:', socket.id);
-    // Ici vous devriez gérer la sortie des salles
   });
 });
 
