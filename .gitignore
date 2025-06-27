@@ -1,0 +1,4 @@
+# Ne pas envoyer les modules et les fichiers sensibles
+node_modules
+.env
+.DS_Store
