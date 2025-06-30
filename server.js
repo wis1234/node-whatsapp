@@ -26,14 +26,12 @@ const io = new Server(httpServer, {
 });
 
 // Gestion des participants par salle
-// Chaque participant : { socketId, userName, profilePhoto, isMuted, isVideoOff, isScreenSharing }
 const participants = {}; // { roomId: { socketId: { userName, profilePhoto, isMuted, isVideoOff, isScreenSharing } } }
 
 // Middleware d'authentification (à adapter selon votre backend Laravel)
 io.use(async (socket, next) => {
   try {
     const token = socket.handshake.auth.token;
-    // Ici vous pouvez valider le token avec Laravel si besoin
     if (!token) throw new Error('Token manquant');
     next();
   } catch (err) {
@@ -49,10 +47,8 @@ io.on('connection', (socket) => {
   socket.on('join-room', (roomId, userName, profilePhoto = null) => {
     socket.join(roomId);
 
-    // Initialise la salle si besoin
     if (!participants[roomId]) participants[roomId] = {};
 
-    // Ajoute le participant avec ses infos de base
     participants[roomId][socket.id] = {
       userName,
       profilePhoto,
@@ -61,13 +57,11 @@ io.on('connection', (socket) => {
       isScreenSharing: false
     };
 
-    // Envoie la liste à tous les clients de la salle
     io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
       socketId,
       ...user
     })));
 
-    // Notifie les autres (optionnel)
     socket.to(roomId).emit('user-joined', { socketId: socket.id, userName, profilePhoto });
     console.log(`Socket ${socket.id} (${userName}) a rejoint la salle ${roomId}`);
   });
@@ -107,29 +101,22 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Signalisation WebRTC
-  // socket.on('signal', (data) => {
-  //   socket.to(data.roomId).emit('signal', {
-  //     ...data,
-  //     from: socket.id
-  //   });
-  // });
-
+  // Signalisation WebRTC (CORRIGÉ ICI)
   socket.on('signal', (data) => {
-  if (data.to) {
-    io.to(data.to).emit('signal', {
-      ...data,
-      from: socket.id
-    });
-  }
-});
+    // On route UNIQUEMENT au destinataire
+    if (data.to) {
+      io.to(data.to).emit('signal', {
+        ...data,
+        from: socket.id
+      });
+    }
+  });
 
   // Quand un utilisateur quitte (déconnexion)
   socket.on('disconnecting', () => {
     for (const roomId of socket.rooms) {
       if (participants[roomId]) {
         delete participants[roomId][socket.id];
-        // Met à jour la liste pour tous
         io.to(roomId).emit('participants-list', Object.entries(participants[roomId]).map(([socketId, user]) => ({
           socketId,
           ...user
