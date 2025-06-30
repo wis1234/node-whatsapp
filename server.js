@@ -108,12 +108,21 @@ io.on('connection', (socket) => {
   });
 
   // Signalisation WebRTC
+  // socket.on('signal', (data) => {
+  //   socket.to(data.roomId).emit('signal', {
+  //     ...data,
+  //     from: socket.id
+  //   });
+  // });
+
   socket.on('signal', (data) => {
-    socket.to(data.roomId).emit('signal', {
+  if (data.to) {
+    io.to(data.to).emit('signal', {
       ...data,
       from: socket.id
     });
-  });
+  }
+});
 
   // Quand un utilisateur quitte (déconnexion)
   socket.on('disconnecting', () => {
